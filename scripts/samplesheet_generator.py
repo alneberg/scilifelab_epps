@@ -578,30 +578,84 @@ def find_barcode(sample_idxs, sample, process):
 
 
 def upload_to_genstat(data, metadata, fc_name):
+    sys.stderr.write(
+        f"\n=== DEBUG: upload_to_genstat called for flowcell: {fc_name} ===\n"
+    )
+    sys.stderr.write(f"DEBUG: Number of data entries: {len(data)}\n")
+    sys.stderr.write(f"DEBUG: Metadata: {json.dumps(metadata, indent=2)}\n")
+
     config_genstat = "~/config/genstat-conf.yaml"
-    with open(os.path.expanduser(config_genstat)) as config_file:
-        config: dict[str, Any] = yaml.safe_load(config_file)
+    expanded_config_path = os.path.expanduser(config_genstat)
+    sys.stderr.write(f"DEBUG: Loading config from: {expanded_config_path}\n")
+
+    try:
+        with open(expanded_config_path) as config_file:
+            config: dict[str, Any] = yaml.safe_load(config_file)
+        sys.stderr.write(f"DEBUG: Config loaded successfully\n")
+        sys.stderr.write(f"DEBUG: Config keys: {list(config.keys())}\n")
+    except Exception as e:
+        sys.stderr.write(f"DEBUG: Error loading config: {str(e)}\n")
+        raise
+
     if not config["samplesheet_key"]:
+        sys.stderr.write("DEBUG: samplesheet_key not found in config!\n")
         email_responsible(
             f"Genomics status token credentials not found in {lims}\n Samplesheet upload for {fc_name} failed on LIMS! Please contact genomics-bioinfo@scilifelab.se to resolve the issue!",
             "genomics-bioinfo@scilifelab.se",
         )
         sys.exit(2)
 
-    signed_jwt: str = create_jwt_token(config["samplesheet_key"])
+    sys.stderr.write(
+        f"DEBUG: samplesheet_key config keys: {list(config['samplesheet_key'].keys())}\n"
+    )
+    sys.stderr.write(f"DEBUG: Creating JWT token...\n")
+
+    try:
+        signed_jwt: str = create_jwt_token(config["samplesheet_key"])
+        sys.stderr.write(
+            f"DEBUG: JWT token created successfully (length: {len(signed_jwt)})\n"
+        )
+        sys.stderr.write(f"DEBUG: JWT token preview: {signed_jwt[:50]}...\n")
+    except Exception as e:
+        sys.stderr.write(f"DEBUG: Error creating JWT token: {str(e)}\n")
+        raise
+
     genstat_sample_info_url = (
         f"{config['genomics-status-url']}/api/v1/demux_sample_info/{fc_name}"
     )
-    result: requests.Response = requests.post(
-        genstat_sample_info_url,
-        headers={"Authorization": f"Bearer {signed_jwt}"},
-        json={"uploaded_lims_info": data, "metadata": metadata},
+    sys.stderr.write(f"DEBUG: API URL: {genstat_sample_info_url}\n")
+
+    payload = {"uploaded_lims_info": data, "metadata": metadata}
+    sys.stderr.write(
+        f"DEBUG: Payload structure - uploaded_lims_info entries: {len(payload['uploaded_lims_info'])}, metadata keys: {list(payload['metadata'].keys())}\n"
     )
 
+    sys.stderr.write(f"DEBUG: Sending POST request to genstat...\n")
+
+    try:
+        result: requests.Response = requests.post(
+            genstat_sample_info_url,
+            headers={"Authorization": f"Bearer {signed_jwt}"},
+            json=payload,
+        )
+        sys.stderr.write(
+            f"DEBUG: Response received - Status code: {result.status_code}\n"
+        )
+        sys.stderr.write(f"DEBUG: Response headers: {dict(result.headers)}\n")
+        sys.stderr.write(f"DEBUG: Response body: {result.text}\n")
+    except Exception as e:
+        sys.stderr.write(f"DEBUG: Exception during POST request: {str(e)}\n")
+        raise
+
     if result.status_code != 201:
+        sys.stderr.write(f"DEBUG: Upload failed with status {result.status_code}\n")
         msg = f"Samplesheet upload failed from {lims} to {config['genomics-status-url']} for {fc_name}"
         msg += f"\nStatus code: {result.status_code}\nResponse: {result.text}\n"
         email_responsible(msg, "genomics-bioinfo@scilifelab.se")
+    else:
+        sys.stderr.write(f"DEBUG: Upload successful (201 Created)\n")
+
+    sys.stderr.write(f"=== DEBUG: upload_to_genstat completed ===\n\n")
 
 
 def test():
